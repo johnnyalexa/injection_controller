@@ -8,35 +8,81 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 
+#define __DELAY_BACKWARD_COMPATIBLE__
+#define F_CPU 16000000UL
+#include <util/delay.h>
+
+
+#define TMAX			37500UL
+#define GET_T(freq)		TMAX - (117UL * freq)
+#define GET_T1(period, duty)	(double)((double)period * (double)duty) / 255
+#define GET_T2(period, t1)		(double)period - (double)t1
+
+void CpuInit(void);
+void ADC_Init(void);
+
+
+
 int main(void)
 {
+	int i;
+	unsigned int injector;
+	unsigned char frequency_pc0; // Variable to hold ADC result
+	unsigned char duty_cycle_pc1;
+	double t,t1,t2;
+	
 	CpuInit();
     while(1)
     {
         //TODO:: Please write your application code 
+		ADMUX &= ~(1<<MUX0); // PC0
+		ADCSRA |= (1<<ADSC); // Start conversion
+			while (ADCSRA & (1<<ADSC)); // wait for conversion to complete
+		
+		frequency_pc0 = ADCH; //Store ADC value
+		
+		ADMUX |= (1<<MUX0); //PC1
+		ADCSRA |= (1<<ADSC); // Start conversion
+		while (ADCSRA & (1<<ADSC)); // wait for conversion to complete
+		
+		duty_cycle_pc1 = ADCH; //Store ADC value
+		
+		t = GET_T(frequency_pc0);
+		t1 = GET_T1(t,duty_cycle_pc1);
+		t2 = GET_T2(t,t1);
+		
+		//for(i = 0; i<10; i++){
+			for(injector=0;injector<4;injector++){
+				PORTD |= 1<<injector;
+				_delay_us(t1);
+				PORTD &= ~(1<<injector);
+				_delay_us(t2);
+			}
+		
+		//}
+		
+		
     }
 }
 
 void CpuInit(void){
+/*	
+*	PC0 - Frequency
+*	PC1 - Duty Cycle
+*	PDO -> PD3 - Transistor control
+*/
 	//port init
 	PORTD	= 0x00;
 	DDRD	= 0x0F; //injection out
 	PORTC	= 0x00;
 	DDRC	= 0x00;  //adc in
-	
-	Init_Timer1();
+	PORTB   = 0x00;
+	DDRB	= 0xFF;
 	ADC_Init();
 	
 }
 
-/*
- * Timer 1 Interrupt routine
- */
-ISR(TIMER1_COMPA_vect){
-    //OCR1A = 14400;
-//    seconds++;
-//    state |= ONE_SECOND_INT;    
-}
+
 
 /*-------------------- ADC_Init       -------------------------
 *    Function:    ADC_Init
@@ -47,50 +93,8 @@ ISR(TIMER1_COMPA_vect){
 *------------------------------------------------------------*/
 void ADC_Init(void){
 	//Set the Band Gap voltage as the ADC input
-	ADMUX = (1<<MUX3)|(1<<MUX2)|(1<<MUX1)|(1<<REFS0);
+	ADMUX = (0<<MUX0)|(1<<ADLAR); // ADC0 enabled.
 	// ADC en, 128 division factor
 	ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS0);
 }
 
-/*-------------------- Timer1_Start  -------------------------
-*    Function:    Timer1_Start
-*    Purpose:    Start timer 1. After Init the timer is stopped
-*
-*    Parameters:    none
-*    Returns:    none
-*------------------------------------------------------------*/
-void Timer1_Start(void){
-	// clkI/O/64 (from prescaler)
-	TCCR1B |= (1<<CS11) | (1<<CS10);
-}
-
-/*-------------------- Timer1_Stop   -------------------------
-*    Function:    Timer1_Stop
-*    Purpose:    Stop timer 1
-*
-*    Parameters:    none
-*    Returns:    none
-*------------------------------------------------------------*/
-void Timer1_Stop(void){
-	//stop timer with prescaler 64
-	TCCR1B &= ~((1<<CS11) | (1<<CS10));
-}
-
-/*-------------------- Init_Timer1   -------------------------
-*    Function:    Init_Timer1
-*    Purpose:    Initialize timer 1
-*
-*    Parameters:        none
-*    Returns:    none
-*------------------------------------------------------------*/
-void Init_Timer1(void){
-	
-	// set up timer with prescaler = 8
-	TCCR1B = (1 << WGM12);
-	//set the top value for 1 sec interrupt
-	OCR1A = 14400;
-	// initialize counter
-	//TCNT1 = 0;
-	// enable compare match interrupt
-	TIMSK = (1 << OCIE1A);// | (1<<TOIE1);
-}
